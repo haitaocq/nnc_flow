@@ -1,0 +1,160 @@
+services:
+  # 核心数据库服务
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 数据库管理面板
+  pgadmin:
+    image: dpage/pgadmin4:7.8
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+    ports:
+      - "8081:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+
+  # Redis消息队列服务
+  redis:
+    image: redis:7.2-alpine
+    container_name: redis
+    command: 
+      - redis-server 
+      - "--requirepass ${REDIS_PASSWORD}"
+      - "--maxmemory ${REDIS_MAXMEMORY}"
+      - "--maxmemory-policy ${REDIS_MAXMEMORY_POLICY}"
+      - "--save ''"  # 禁用持久化提升性能
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # 无代码平台
+  nocodb:
+    image: nocodb/nocodb:latest
+    container_name: nocodb
+    environment:
+      NC_DB: "pg://postgres:5432?u=${DB_USER}&p=${DB_PASSWORD}&d=${DB_NAME}"
+      NC_AUTH_JWT_SECRET: ${JWT_SECRET}
+      NC_PUBLIC_URL: ${NC_PUBLIC_URL}
+      NC_REDIS_URL: "redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/0"
+    ports:
+      - "8080:8080"
+    volumes:
+      - nocodb_data:/usr/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+
+  # n8n主节点
+  n8n-main:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: n8n-main
+    environment:
+      EXECUTIONS_MODE: ${EXECUTIONS_MODE}
+      DB_TYPE: ${DB_TYPE}
+      DB_POSTGRESDB_DATABASE: ${DB_POSTGRESDB_DATABASE}
+      DB_POSTGRESDB_HOST: ${DB_POSTGRESDB_HOST}
+      DB_POSTGRESDB_PORT: ${DB_POSTGRESDB_PORT}
+      DB_POSTGRESDB_USER: ${DB_POSTGRESDB_USER}
+      DB_POSTGRESDB_PASSWORD: ${DB_POSTGRESDB_PASSWORD}
+      DB_POSTGRESDB_POOL_SIZE: ${DB_POSTGRESDB_POOL_SIZE}
+      QUEUE_BULL_REDIS_HOST: ${QUEUE_BULL_REDIS_HOST}
+      QUEUE_BULL_REDIS_PORT: ${QUEUE_BULL_REDIS_PORT}
+      QUEUE_BULL_REDIS_PASSWORD: ${QUEUE_BULL_REDIS_PASSWORD}
+      N8N_ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      QUEUE_HEALTH_CHECK_ACTIVE: ${QUEUE_HEALTH_CHECK_ACTIVE}
+      QUEUE_HEALTH_CHECK_PORT: ${QUEUE_HEALTH_CHECK_PORT}
+      QUEUE_WORKER_CONCURRENCY: ${QUEUE_WORKER_CONCURRENCY}
+      N8N_DISABLE_PRODUCTION_MAIN_PROCESS: ${N8N_DISABLE_PRODUCTION_MAIN_PROCESS}
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE}
+      N8N_DEFAULT_LOCALE: ${N8N_DEFAULT_LOCALE}
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+
+  # Worker节点
+  n8n-worker:
+    image: docker.n8n.io/n8nio/n8n
+    command: worker
+    environment:
+      EXECUTIONS_MODE: ${EXECUTIONS_MODE}
+      DB_TYPE: ${DB_TYPE}
+      DB_POSTGRESDB_DATABASE: ${DB_POSTGRESDB_DATABASE}
+      DB_POSTGRESDB_HOST: ${DB_POSTGRESDB_HOST}
+      DB_POSTGRESDB_PORT: ${DB_POSTGRESDB_PORT}
+      DB_POSTGRESDB_USER: ${DB_POSTGRESDB_USER}
+      DB_POSTGRESDB_PASSWORD: ${DB_POSTGRESDB_PASSWORD}
+      DB_POSTGRESDB_POOL_SIZE: ${WORKER_DB_POSTGRESDB_POOL_SIZE}
+      QUEUE_BULL_REDIS_HOST: ${QUEUE_BULL_REDIS_HOST}
+      QUEUE_BULL_REDIS_PORT: ${QUEUE_BULL_REDIS_PORT}
+      QUEUE_BULL_REDIS_PASSWORD: ${QUEUE_BULL_REDIS_PASSWORD}
+      N8N_ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      QUEUE_HEALTH_CHECK_ACTIVE: ${QUEUE_HEALTH_CHECK_ACTIVE}
+      QUEUE_HEALTH_CHECK_PORT: ${QUEUE_HEALTH_CHECK_PORT}
+      QUEUE_WORKER_CONCURRENCY: ${WORKER_QUEUE_WORKER_CONCURRENCY}
+      N8N_GRACEFUL_SHUTDOWN_TIMEOUT: ${N8N_GRACEFUL_SHUTDOWN_TIMEOUT}
+      QUEUE_WORKER_STALLED_INTERVAL: ${QUEUE_WORKER_STALLED_INTERVAL}
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE}
+      N8N_DEFAULT_LOCALE: ${N8N_DEFAULT_LOCALE}
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
+  nocodb_data:
+  n8n_data:
+
+networks:
+  backend:
+    driver: bridge
+    attachable: true
