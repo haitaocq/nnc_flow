@@ -1,0 +1,18 @@
+version: "v1"
+envs:
+
+extensions:
+
+lifecycle:
+   init:
+      - name: "init test"
+        command: "cd /workspace/nnc_flow && touch test.txt"
+   start:
+      - name: "run app"
+        command: "cd /workspace/nnc_flow && PORT=8080 && port=8080 && chmod +x deploy.sh && bash deploy.sh"
+sidecar:
+
+name: "nnc_flow app run"
+description: "启动环境时，自动启动nccfow自动化工作流"
+tags:
+  - "nnc_flow" 
